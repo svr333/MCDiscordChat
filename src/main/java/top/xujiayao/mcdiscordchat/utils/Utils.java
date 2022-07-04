@@ -71,6 +71,10 @@ public class Utils {
 				CONFIG.latestVersion = latestVersion;
 				ConfigManager.update();
 
+				if (!CONFIG.generic.broadcastUpdateNotification) {
+					return "";
+				}
+
 				if (!latestVersion.equals(VERSION)) {
 					if (CONFIG.latestVersion.equals(latestVersion)
 							&& CONFIG.latestCheckTime > (System.currentTimeMillis() - 172800000)
