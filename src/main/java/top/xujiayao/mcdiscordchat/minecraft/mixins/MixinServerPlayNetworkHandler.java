@@ -1,4 +1,3 @@
-//#if MC >= 11600
 package top.xujiayao.mcdiscordchat.minecraft.mixins;
 
 import com.google.gson.Gson;
@@ -8,21 +7,23 @@ import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.Role;
 import net.dv8tion.jda.api.entities.emoji.RichCustomEmoji;
 import net.dv8tion.jda.api.utils.MarkdownSanitizer;
-import net.minecraft.client.option.ChatVisibility;
-import net.minecraft.network.MessageType;
-import net.minecraft.network.Packet;
-import net.minecraft.network.packet.s2c.play.GameMessageS2CPacket;
+import net.minecraft.SharedConstants;
+import net.minecraft.network.listener.ServerPlayPacketListener;
+import net.minecraft.network.message.DecoratedContents;
+import net.minecraft.network.message.FilterMask;
+import net.minecraft.network.message.LastSeenMessageList;
+import net.minecraft.network.message.MessageChainTaskQueue;
+import net.minecraft.network.message.MessageType;
+import net.minecraft.network.message.SignedMessage;
+import net.minecraft.network.packet.c2s.play.ChatMessageC2SPacket;
+import net.minecraft.network.packet.c2s.play.CommandExecutionC2SPacket;
 import net.minecraft.server.MinecraftServer;
-//#if MC >= 11700
-import net.minecraft.server.filter.TextStream.Message;
-//#endif
+import net.minecraft.server.filter.FilteredMessage;
 import net.minecraft.server.network.ServerPlayNetworkHandler;
 import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.text.LiteralText;
+import net.minecraft.server.world.EntityTrackingListener;
 import net.minecraft.text.Text;
-import net.minecraft.text.TranslatableText;
 import net.minecraft.util.Formatting;
-import net.minecraft.util.Util;
 import okhttp3.MediaType;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -38,8 +39,12 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import top.xujiayao.mcdiscordchat.utils.MarkdownParser;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static top.xujiayao.mcdiscordchat.Main.CHANNEL;
 import static top.xujiayao.mcdiscordchat.Main.CONFIG;
@@ -55,7 +60,7 @@ import static top.xujiayao.mcdiscordchat.Main.SERVER;
  * @author Xujiayao
  */
 @Mixin(ServerPlayNetworkHandler.class)
-public abstract class MixinServerPlayNetworkHandler {
+public abstract class MixinServerPlayNetworkHandler implements EntityTrackingListener, ServerPlayPacketListener {
 
 	@Shadow
 	private ServerPlayerEntity player;
@@ -64,160 +69,193 @@ public abstract class MixinServerPlayNetworkHandler {
 	@Shadow
 	private MinecraftServer server;
 
+	@Final
 	@Shadow
-	private int messageCooldown;
+	private MessageChainTaskQueue messageChainTaskQueue;
 
 	@Shadow
-	public abstract void sendPacket(Packet<?> packet);
-
-	@Shadow
-	public abstract void executeCommand(String input);
+	public abstract void checkForSpam();
 
 	@Shadow
 	public abstract void disconnect(Text reason);
 
-	//#if MC >= 11700
-	@Inject(method = "handleMessage", at = @At("HEAD"), cancellable = true)
-	private void handleMessage(Message message, CallbackInfo ci) {
-	//#else
-	//$$ @Inject(method = "method_31286", at = @At("HEAD"), cancellable = true)
-	//$$ private void handleMessage(String string, CallbackInfo ci) {
-	//#endif
-		if (player.getClientChatVisibility() == ChatVisibility.HIDDEN) {
-			sendPacket(new GameMessageS2CPacket((new TranslatableText("chat.disabled.options")).formatted(Formatting.RED), MessageType.SYSTEM, Util.NIL_UUID));
-			ci.cancel();
-		} else {
-			player.updateLastActionTime();
+	@Shadow
+	public abstract CompletableFuture<FilteredMessage> filterText(String text);
 
-			//#if MC >= 11700
-			if (message.getRaw().startsWith("/")) {
-				executeCommand(message.getRaw());
-			//#else
-			//$$ if (string.startsWith("/")) {
-			//$$  executeCommand(string);
-			//#endif
-				ci.cancel();
-			} else {
-				//#if MC >= 11700
-				String contentToDiscord = message.getRaw();
-				String contentToMinecraft = message.getRaw();
-				//#else
-				//$$ String contentToDiscord = string;
-				//$$ String contentToMinecraft = string;
-				//#endif
+	@Shadow
+	public abstract boolean canAcceptMessage(String string, Instant instant, LastSeenMessageList.Acknowledgment acknowledgment);
 
-				if (StringUtils.countMatches(contentToDiscord, ":") >= 2) {
-					String[] emojiNames = StringUtils.substringsBetween(contentToDiscord, ":", ":");
-					for (String emojiName : emojiNames) {
-						List<RichCustomEmoji> emojis = JDA.getEmojisByName(emojiName, true);
-						if (!emojis.isEmpty()) {
-							contentToDiscord = StringUtils.replaceIgnoreCase(contentToDiscord, (":" + emojiName + ":"), emojis.get(0).getAsMention());
-							contentToMinecraft = StringUtils.replaceIgnoreCase(contentToMinecraft, (":" + emojiName + ":"), (Formatting.YELLOW + ":" + emojiName + ":" + Formatting.WHITE));
-						} else if (EmojiManager.getForAlias(emojiName) != null) {
-							contentToMinecraft = StringUtils.replaceIgnoreCase(contentToMinecraft, (":" + emojiName + ":"), (Formatting.YELLOW + ":" + emojiName + ":" + Formatting.WHITE));
-						}
+	@Shadow
+	public abstract boolean canAcceptMessage(SignedMessage message);
+
+	@Shadow
+	public abstract void handleCommandExecution(CommandExecutionC2SPacket packet);
+
+	@Shadow
+	public abstract SignedMessage getSignedMessage(ChatMessageC2SPacket packet);
+
+	@Shadow
+	public abstract void handleDecoratedMessage(SignedMessage signedMessage);
+
+	@Inject(method = "onChatMessage", at = @At("HEAD"), cancellable = true)
+	private void onChatMessage(ChatMessageC2SPacket packet, CallbackInfo ci) {
+		if (hasIllegalCharacter(packet.chatMessage())) {
+			disconnect(Text.translatable("multiplayer.disconnect.illegal_characters"));
+		} else if (canAcceptMessage(packet.chatMessage(), packet.timestamp(), packet.acknowledgment())) {
+			String contentToDiscord = packet.chatMessage();
+			String contentToMinecraft = packet.chatMessage();
+
+			if (StringUtils.countMatches(contentToDiscord, ":") >= 2) {
+				String[] emojiNames = StringUtils.substringsBetween(contentToDiscord, ":", ":");
+				for (String emojiName : emojiNames) {
+					List<RichCustomEmoji> emojis = JDA.getEmojisByName(emojiName, true);
+					if (!emojis.isEmpty()) {
+						contentToDiscord = StringUtils.replaceIgnoreCase(contentToDiscord, (":" + emojiName + ":"), emojis.get(0).getAsMention());
+						contentToMinecraft = StringUtils.replaceIgnoreCase(contentToMinecraft, (":" + emojiName + ":"), (Formatting.YELLOW + ":" + emojiName + ":" + Formatting.WHITE));
+					} else if (EmojiManager.getForAlias(emojiName) != null) {
+						contentToMinecraft = StringUtils.replaceIgnoreCase(contentToMinecraft, (":" + emojiName + ":"), (Formatting.YELLOW + ":" + emojiName + ":" + Formatting.WHITE));
 					}
-				}
-
-				if (CONFIG.generic.allowMentions) {
-					if (contentToDiscord.contains("@")) {
-						String[] names = StringUtils.substringsBetween(contentToDiscord, "@", " ");
-						if (!StringUtils.substringAfterLast(contentToDiscord, "@").contains(" ")) {
-							names = ArrayUtils.add(names, StringUtils.substringAfterLast(contentToDiscord, "@"));
-						}
-						for (String name : names) {
-							for (Member member : CHANNEL.getMembers()) {
-								if (member.getUser().getName().equalsIgnoreCase(name)
-										|| (member.getNickname() != null && member.getNickname().equalsIgnoreCase(name))) {
-									contentToDiscord = StringUtils.replaceIgnoreCase(contentToDiscord, ("@" + name), member.getAsMention());
-									contentToMinecraft = StringUtils.replaceIgnoreCase(contentToMinecraft, ("@" + name), (Formatting.YELLOW + "@" + member.getEffectiveName() + Formatting.WHITE));
-								}
-							}
-							for (Role role : CHANNEL.getGuild().getRoles()) {
-								if (role.getName().equalsIgnoreCase(name)) {
-									contentToDiscord = StringUtils.replaceIgnoreCase(contentToDiscord, ("@" + name), role.getAsMention());
-									contentToMinecraft = StringUtils.replaceIgnoreCase(contentToMinecraft, ("@" + name), (Formatting.YELLOW + "@" + role.getName() + Formatting.WHITE));
-								}
-							}
-						}
-						contentToMinecraft = StringUtils.replaceIgnoreCase(contentToMinecraft, "@everyone", (Formatting.YELLOW + "@everyone" + Formatting.WHITE));
-						contentToMinecraft = StringUtils.replaceIgnoreCase(contentToMinecraft, "@here", (Formatting.YELLOW + "@here" + Formatting.WHITE));
-					}
-				}
-
-				contentToMinecraft = MarkdownParser.parseMarkdown(contentToMinecraft);
-
-				for (String protocol : new String[]{"http://", "https://"}) {
-					if (contentToMinecraft.contains(protocol)) {
-						String[] links = StringUtils.substringsBetween(contentToMinecraft, protocol, " ");
-						if (!StringUtils.substringAfterLast(contentToMinecraft, protocol).contains(" ")) {
-							links = ArrayUtils.add(links, StringUtils.substringAfterLast(contentToMinecraft, protocol));
-						}
-						for (String link : links) {
-							if (link.contains("\n")) {
-								link = StringUtils.substringBefore(link, "\n");
-							}
-
-							String hyperlinkInsert;
-							if (StringUtils.containsIgnoreCase(link, "gif")
-									&& StringUtils.containsIgnoreCase(link, "tenor.com")) {
-								hyperlinkInsert = "\"},{\"text\":\"<gif>\",\"underlined\":true,\"color\":\"yellow\",\"clickEvent\":{\"action\":\"open_url\",\"value\":\"" + protocol + link + "\"},\"hoverEvent\":{\"action\":\"show_text\",\"contents\":[{\"text\":\"Open URL\"}]}},{\"text\":\"";
-							} else {
-								hyperlinkInsert = "\"},{\"text\":\"" + protocol + link + "\",\"underlined\":true,\"color\":\"yellow\",\"clickEvent\":{\"action\":\"open_url\",\"value\":\"" + protocol + link + "\"},\"hoverEvent\":{\"action\":\"show_text\",\"contents\":[{\"text\":\"Open URL\"}]}},{\"text\":\"";
-							}
-							contentToMinecraft = StringUtils.replaceIgnoreCase(contentToMinecraft, (protocol + link), hyperlinkInsert);
-						}
-					}
-				}
-
-				if (CONFIG.generic.formatChatMessages) {
-					//#if MC >= 11800
-					server.getPlayerManager().broadcast(new TranslatableText("chat.type.text", player.getDisplayName(), Text.Serializer.fromJson("[{\"text\":\"" + contentToMinecraft + "\"}]")), MessageType.CHAT, player.getUuid());
-					//#else
-					//$$ server.getPlayerManager().broadcastChatMessage(new TranslatableText("chat.type.text", player.getDisplayName(), Text.Serializer.fromJson("[{\"text\":\"" + contentToMinecraft + "\"}]")), MessageType.CHAT, player.getUuid());
-					//#endif
-					ci.cancel();
-				}
-
-				sendMessage(contentToDiscord, false);
-				if (CONFIG.multiServer.enable) {
-					//#if MC >= 11700
-					MULTI_SERVER.sendMessage(false, true, player.getEntityName(), CONFIG.generic.formatChatMessages ? contentToMinecraft : message.getRaw());
-					//#else
-					//$$ MULTI_SERVER.sendMessage(false, true, player.getEntityName(), CONFIG.generic.formatChatMessages ? contentToMinecraft : string);
-					//#endif
 				}
 			}
 
-			messageCooldown += 20;
-			if (messageCooldown > 200 && !server.getPlayerManager().isOperator(player.getGameProfile())) {
-				disconnect(new TranslatableText("disconnect.spam"));
+			if (CONFIG.generic.allowMentions && contentToDiscord.contains("@")) {
+				List<String> parsedList = new ArrayList<>();
+				Pattern pattern = Pattern.compile("@[^@]*?#\\d{4}");
+				Matcher matcher = pattern.matcher(contentToDiscord);
+				while (matcher.find()) {
+					String tagMention = matcher.group();
+					Member member = CHANNEL.getGuild().getMemberByTag(tagMention.substring(1));
+					if (member != null) {
+						parsedList.add(member.getUser().getName());
+						parsedList.add(member.getEffectiveName());
+
+						String formattedMention = Formatting.YELLOW + "@" + member.getEffectiveName() + Formatting.WHITE;
+						contentToDiscord = StringUtils.replaceIgnoreCase(contentToDiscord, tagMention, member.getAsMention());
+						contentToMinecraft = StringUtils.replaceIgnoreCase(contentToMinecraft, tagMention, formattedMention);
+					}
+				}
+
+				for (Member member : CHANNEL.getMembers()) {
+					if (parsedList.contains(member.getUser().getName()) || parsedList.contains(member.getEffectiveName())) {
+						continue;
+					}
+
+					String usernameMention = "@" + member.getUser().getName();
+					String formattedMention = Formatting.YELLOW + "@" + member.getEffectiveName() + Formatting.WHITE;
+
+					contentToDiscord = StringUtils.replaceIgnoreCase(contentToDiscord, usernameMention, member.getAsMention());
+					contentToMinecraft = StringUtils.replaceIgnoreCase(contentToMinecraft, usernameMention, formattedMention);
+
+					if (member.getNickname() != null) {
+						String nicknameMention = "@" + member.getNickname();
+						contentToDiscord = StringUtils.replaceIgnoreCase(contentToDiscord, nicknameMention, member.getAsMention());
+						contentToMinecraft = StringUtils.replaceIgnoreCase(contentToMinecraft, nicknameMention, formattedMention);
+					}
+				}
+				for (Role role : CHANNEL.getGuild().getRoles()) {
+					String roleMention = "@" + role.getName();
+					String formattedMention = Formatting.YELLOW + "@" + role.getName() + Formatting.WHITE;
+					contentToDiscord = StringUtils.replaceIgnoreCase(contentToDiscord, roleMention, role.getAsMention());
+					contentToMinecraft = StringUtils.replaceIgnoreCase(contentToMinecraft, roleMention, formattedMention);
+				}
+				contentToMinecraft = StringUtils.replaceIgnoreCase(contentToMinecraft, "@everyone", Formatting.YELLOW + "@everyone" + Formatting.WHITE);
+				contentToMinecraft = StringUtils.replaceIgnoreCase(contentToMinecraft, "@here", Formatting.YELLOW + "@here" + Formatting.WHITE);
+			}
+
+			contentToMinecraft = MarkdownParser.parseMarkdown(contentToMinecraft.replace("\\", "\\\\"));
+
+			for (String protocol : new String[]{"http://", "https://"}) {
+				if (contentToMinecraft.contains(protocol)) {
+					String[] links = StringUtils.substringsBetween(contentToMinecraft, protocol, " ");
+					if (!StringUtils.substringAfterLast(contentToMinecraft, protocol).contains(" ")) {
+						links = ArrayUtils.add(links, StringUtils.substringAfterLast(contentToMinecraft, protocol));
+					}
+					for (String link : links) {
+						if (link.contains("\n")) {
+							link = StringUtils.substringBefore(link, "\n");
+						}
+
+						String hyperlinkInsert;
+						if (StringUtils.containsIgnoreCase(link, "gif")
+								&& StringUtils.containsIgnoreCase(link, "tenor.com")) {
+							hyperlinkInsert = "\"},{\"text\":\"<gif>\",\"underlined\":true,\"color\":\"yellow\",\"clickEvent\":{\"action\":\"open_url\",\"value\":\"" + protocol + link + "\"},\"hoverEvent\":{\"action\":\"show_text\",\"contents\":[{\"text\":\"Open URL\"}]}},{\"text\":\"";
+						} else {
+							hyperlinkInsert = "\"},{\"text\":\"" + protocol + link + "\",\"underlined\":true,\"color\":\"yellow\",\"clickEvent\":{\"action\":\"open_url\",\"value\":\"" + protocol + link + "\"},\"hoverEvent\":{\"action\":\"show_text\",\"contents\":[{\"text\":\"Open URL\"}]}},{\"text\":\"";
+						}
+						contentToMinecraft = StringUtils.replaceIgnoreCase(contentToMinecraft, (protocol + link), hyperlinkInsert);
+					}
+				}
+			}
+
+			if (CONFIG.generic.formatChatMessages) {
+				server.getPlayerManager().broadcast(SignedMessage.ofUnsigned(new DecoratedContents(packet.chatMessage(), Text.Serializer.fromJson("[{\"text\":\"" + contentToMinecraft + "\"}]"))), player, MessageType.params(MessageType.CHAT, player));
+			} else {
+				server.submit(() -> {
+					SignedMessage signedMessage1 = getSignedMessage(packet);
+					if (canAcceptMessage(signedMessage1)) {
+						messageChainTaskQueue.append(() -> {
+							CompletableFuture<FilteredMessage> completableFuture = filterText(signedMessage1.getSignedContent().plain());
+							CompletableFuture<SignedMessage> completableFuture2 = server.getMessageDecorator().decorate(player, signedMessage1);
+							return CompletableFuture.allOf(completableFuture, completableFuture2).thenAcceptAsync((void_) -> {
+								FilterMask filterMask = (completableFuture.join()).mask();
+								SignedMessage signedMessage2 = (completableFuture2.join()).withFilterMask(filterMask);
+								handleDecoratedMessage(signedMessage2);
+							}, server);
+						});
+					}
+				});
+			}
+
+			sendMessage(contentToDiscord, false);
+			if (CONFIG.multiServer.enable) {
+				MULTI_SERVER.sendMessage(false, true, false, player.getEntityName(), CONFIG.generic.formatChatMessages ? contentToMinecraft : packet.chatMessage());
 			}
 		}
+
+		ci.cancel();
 	}
 
-	@Inject(method = "executeCommand", at = @At(value = "HEAD"))
-	private void executeCommand(String input, CallbackInfo ci) {
-		if (CONFIG.generic.broadcastCommandExecution && !CONFIG.generic.excludedCommands.contains(input)) {
-			if ((System.currentTimeMillis() - MINECRAFT_LAST_RESET_TIME) > 20000) {
-				MINECRAFT_SEND_COUNT = 0;
-				MINECRAFT_LAST_RESET_TIME = System.currentTimeMillis();
-			}
+	@Inject(method = "onCommandExecution", at = @At(value = "HEAD"), cancellable = true)
+	private void onCommandExecution(CommandExecutionC2SPacket packet, CallbackInfo ci) {
+		if (CONFIG.generic.broadcastPlayerCommandExecution) {
+			if (hasIllegalCharacter(packet.command())) {
+				disconnect(Text.translatable("multiplayer.disconnect.illegal_characters"));
+			} else if (canAcceptMessage(packet.command(), packet.timestamp(), packet.acknowledgment())) {
+				String input = "/" + packet.command();
 
-			MINECRAFT_SEND_COUNT++;
-			if (MINECRAFT_SEND_COUNT <= 20) {
-				Text text = new LiteralText("<").append(player.getEntityName()).append("> ").append(input);
-
-				List<ServerPlayerEntity> list = new ArrayList<>(server.getPlayerManager().getPlayerList());
-				list.forEach(serverPlayerEntity -> serverPlayerEntity.sendMessage(text, false));
-
-				SERVER.sendSystemMessage(text, player.getUuid());
-
-				sendMessage(input, true);
-				if (CONFIG.multiServer.enable) {
-					MULTI_SERVER.sendMessage(false, true, player.getEntityName(), MarkdownSanitizer.escape(input));
+				for (String command : CONFIG.generic.excludedCommands) {
+					if (input.startsWith(command + " ")) {
+						return;
+					}
 				}
+
+				if ((System.currentTimeMillis() - MINECRAFT_LAST_RESET_TIME) > 20000) {
+					MINECRAFT_SEND_COUNT = 0;
+					MINECRAFT_LAST_RESET_TIME = System.currentTimeMillis();
+				}
+
+				MINECRAFT_SEND_COUNT++;
+				if (MINECRAFT_SEND_COUNT <= 20) {
+					Text text = Text.of("<" + player.getEntityName() + "> " + input);
+
+					List<ServerPlayerEntity> list = new ArrayList<>(server.getPlayerManager().getPlayerList());
+					list.forEach(serverPlayerEntity -> serverPlayerEntity.sendMessage(text, false));
+
+					SERVER.sendMessage(text);
+
+					sendMessage(input, true);
+					if (CONFIG.multiServer.enable) {
+						MULTI_SERVER.sendMessage(false, true, false, player.getEntityName(), MarkdownSanitizer.escape(input));
+					}
+				}
+
+				server.submit(() -> {
+					handleCommandExecution(packet);
+					checkForSpam();
+				});
 			}
+
+			ci.cancel();
 		}
 	}
 
@@ -248,5 +286,14 @@ public abstract class MixinServerPlayNetworkHandler {
 			}
 		}
 	}
+
+	private boolean hasIllegalCharacter(String message) {
+		for (int i = 0; i < message.length(); ++i) {
+			if (!SharedConstants.isValidChar(message.charAt(i))) {
+				return true;
+			}
+		}
+
+		return false;
+	}
 }
-//#endif

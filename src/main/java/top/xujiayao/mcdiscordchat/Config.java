@@ -1,8 +1,5 @@
 package top.xujiayao.mcdiscordchat;
 
-import com.google.gson.Gson;
-import com.google.gson.JsonArray;
-
 import java.util.ArrayList;
 import java.util.List;
 
@@ -17,29 +14,39 @@ public class Config {
 
 	public Generic generic = new Generic();
 	public MultiServer multiServer = new MultiServer();
-	public TextsZH textsZH = new TextsZH();
-	public TextsEN textsEN = new TextsEN();
+	public CustomMessage customMessage = new CustomMessage();
+
+	public String latestVersion = VERSION;
+	public long latestCheckTime = System.currentTimeMillis() - 300000000;
 
 	public static class Generic {
-		public boolean useEngInsteadOfChin = true;
+		public String language = "en_us";
 
 		public String botToken = "";
-		public String botPlayingStatus = "Minecraft";
+		public String botPlayingStatus = "Minecraft (%onlinePlayerCount%/%maxPlayerCount%)";
 		public String botListeningStatus = "";
 
 		public String webhookUrl = "";
 
 		public String channelId = "";
 		public String consoleLogChannelId = "";
+		public String updateNotificationChannelId = "";
 
 		public boolean useUuidInsteadOfName = true;
 
 		public String avatarApi = "https://mc-heads.net/avatar/%player%.png";
 
-		public boolean broadcastCommandExecution = true;
 		public boolean broadcastUpdateNotification = true;
+		public boolean broadcastPlayerCommandExecution = true;
+		public boolean broadcastSlashCommandExecution = true;
+
+		public boolean announceServerStartStop = true;
+		public boolean announcePlayerJoinLeave = true;
+		public boolean announceDeathMessages = true;
+		public boolean announceAdvancements = true;
 
 		public boolean allowMentions = true;
+
 		public boolean formatChatMessages = true;
 
 		public boolean useServerNickname = true;
@@ -48,12 +55,15 @@ public class Config {
 		public int msptCheckInterval = 5000;
 		public int msptLimit = 50;
 
-		public boolean mentionAdmins = true;
+		public boolean notifyUpdates = true;
+		public boolean mentionAdminsForUpdates = true;
 
 		public boolean updateChannelTopic = true;
 		public int channelTopicUpdateInterval = 600000;
 
-		public List<String> excludedCommands = List.of("/tell");
+		public int discordNewlineLimit = 3;
+
+		public List<String> excludedCommands = List.of("/msg", "/tell", "/tellraw", "/w");
 
 		public List<String> adminsIds = new ArrayList<>();
 	}
@@ -66,67 +76,35 @@ public class Config {
 		public List<String> botIds = new ArrayList<>();
 	}
 
-	public static class TextsZH {
-		public String unformattedResponseMessage = "    ┌──── <%name%> %message%";
-		public String unformattedChatMessage = "[%server%] <%name%> %message%";
-		public String unformattedOtherMessage = "[%server%] %message%";
+	@SuppressWarnings("unused")
+	public static class CustomMessage {
+		public String unformattedResponseMessage = "";
+		public String unformattedChatMessage = "";
+		public String unformattedOtherMessage = "";
+		public String unformattedCommandNotice = "";
 
-		public JsonArray formattedResponseMessage = new Gson().fromJson("[{\"text\":\"    ┌──── \",\"bold\":true,\"color\":\"dark_gray\"},{\"text\":\"<%name%> \",\"bold\":false,\"color\":\"%roleColor%\"},{\"text\":\"%message%\",\"bold\":false,\"color\":\"dark_gray\"}]", JsonArray.class);
-		public JsonArray formattedChatMessage = new Gson().fromJson("[{\"text\":\"[%server%] \",\"bold\":true,\"color\":\"blue\"},{\"text\":\"<%name%> \",\"bold\":false,\"color\":\"%roleColor%\"},{\"text\":\"%message%\",\"bold\":false,\"color\":\"gray\"}]", JsonArray.class);
-		public JsonArray formattedOtherMessage = new Gson().fromJson("[{\"text\":\"[%server%] \",\"bold\":true,\"color\":\"blue\"},{\"text\":\"%message%\",\"bold\":false,\"color\":\"gray\"}]", JsonArray.class);
+		public String formattedResponseMessage = "";
+		public String formattedChatMessage = "";
+		public String formattedOtherMessage = "";
+		public String formattedCommandNotice = "";
 
-		public String serverStarted = "**服务器已启动！**";
-		public String serverStopped = "**服务器已关闭！**";
+		public String serverStarted = "";
+		public String serverStopped = "";
 
-		public String joinServer = "**%playerName% 加入了服务器**";
-		public String leftServer = "**%playerName% 离开了服务器**";
+		public String joinServer = "";
+		public String leftServer = "";
 
-		public String deathMessage = "**%deathMessage%**";
+		public String deathMessage = "";
 
-		public String advancementTask = "**%playerName% 达成了进度 [%advancement%]**";
-		public String advancementChallenge = "**%playerName% 完成了挑战 [%advancement%]**";
-		public String advancementGoal = "**%playerName% 达成了目标 [%advancement%]**";
+		public String advancementTask = "";
+		public String advancementChallenge = "";
+		public String advancementGoal = "";
 
-		public String highMspt = "**服务器 MSPT (%mspt%) 高于 %msptLimit%！**";
+		public String highMspt = "";
 
-		public String consoleLogMessage = "[%time%] [INFO] %message%";
-
-		public String offlineChannelTopic = ":x: 服务器离线 | 最后更新于：<t:%lastUpdateTime%:f>";
-		public String onlineChannelTopic = ":white_check_mark: %onlinePlayerCount%/%maxPlayerCount% 位玩家在线 | 服务器玩家总数：%uniquePlayerCount% | 服务器于 <t:%serverStartedTime%:R> 启动 | 最后更新于：<t:%lastUpdateTime%:f>";
-		public String onlineChannelTopicForMultiServer = ":white_check_mark: %onlinePlayerCount%/%maxPlayerCount% 位玩家在线 | 服务器玩家总数：%uniquePlayerCount% | %onlineServerCount% 个服务器在线 [%onlineServerList%] | 服务器于 <t:%serverStartedTime%:R> 启动 | 最后更新于：<t:%lastUpdateTime%:f>";
+		public String offlineChannelTopic = "";
+		public String onlineChannelTopic = "";
+		public String onlineChannelTopicForMultiServer = "";
 	}
-
-	public static class TextsEN {
-		public String unformattedResponseMessage = "    ┌──── <%name%> %message%";
-		public String unformattedChatMessage = "[%server%] <%name%> %message%";
-		public String unformattedOtherMessage = "[%server%] %message%";
-
-		public JsonArray formattedResponseMessage = new Gson().fromJson("[{\"text\":\"    ┌──── \",\"bold\":true,\"color\":\"dark_gray\"},{\"text\":\"<%name%> \",\"bold\":false,\"color\":\"%roleColor%\"},{\"text\":\"%message%\",\"bold\":false,\"color\":\"dark_gray\"}]", JsonArray.class);
-		public JsonArray formattedChatMessage = new Gson().fromJson("[{\"text\":\"[%server%] \",\"bold\":true,\"color\":\"blue\"},{\"text\":\"<%name%> \",\"bold\":false,\"color\":\"%roleColor%\"},{\"text\":\"%message%\",\"bold\":false,\"color\":\"gray\"}]", JsonArray.class);
-		public JsonArray formattedOtherMessage = new Gson().fromJson("[{\"text\":\"[%server%] \",\"bold\":true,\"color\":\"blue\"},{\"text\":\"%message%\",\"bold\":false,\"color\":\"gray\"}]", JsonArray.class);
-
-		public String serverStarted = "**Server started!**";
-		public String serverStopped = "**Server stopped!**";
-
-		public String joinServer = "**%playerName% joined the game**";
-		public String leftServer = "**%playerName% left the game**";
-
-		public String deathMessage = "**%deathMessage%**";
-
-		public String advancementTask = "**%playerName% has made the advancement [%advancement%]**";
-		public String advancementChallenge = "**%playerName% has completed the challenge [%advancement%]**";
-		public String advancementGoal = "**%playerName% has reached the goal [%advancement%]**";
-
-		public String highMspt = "**Server MSPT (%mspt%) is above %msptLimit%!**";
-
-		public String consoleLogMessage = "[%time%] [INFO] %message%";
-
-		public String offlineChannelTopic = ":x: Server offline | Last updated: <t:%lastUpdateTime%:f>";
-		public String onlineChannelTopic = ":white_check_mark: %onlinePlayerCount%/%maxPlayerCount% player(s) online | %uniquePlayerCount% unique player(s) ever joined | Server started <t:%serverStartedTime%:R> | Last updated: <t:%lastUpdateTime%:f>";
-		public String onlineChannelTopicForMultiServer = ":white_check_mark: %onlinePlayerCount%/%maxPlayerCount% player(s) online | %uniquePlayerCount% unique player(s) ever joined | %onlineServerCount% server(s) online [%onlineServerList%] | Server started <t:%serverStartedTime%:R> | Last updated: <t:%lastUpdateTime%:f>";
-	}
-
-	public String latestVersion = VERSION;
-	public long latestCheckTime = System.currentTimeMillis() - 300000000;
 }
 

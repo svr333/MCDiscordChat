@@ -2,11 +2,16 @@ package top.xujiayao.mcdiscordchat;
 
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
-import net.dv8tion.jda.api.entities.TextChannel;
+import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.requests.GatewayIntent;
 import net.dv8tion.jda.api.utils.ChunkingFilter;
 import net.dv8tion.jda.api.utils.MemberCachePolicy;
 import net.fabricmc.api.DedicatedServerModInitializer;
+//#if MC >= 11900
+import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+//#else
+//$$ import net.fabricmc.fabric.api.command.v1.CommandRegistrationCallback;
+//#endif
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.server.MinecraftServer;
@@ -20,13 +25,14 @@ import org.slf4j.LoggerFactory;
 //$$ import org.apache.logging.log4j.LogManager;
 //#endif
 import top.xujiayao.mcdiscordchat.discord.DiscordEventListener;
+import top.xujiayao.mcdiscordchat.minecraft.MinecraftCommands;
 import top.xujiayao.mcdiscordchat.multiServer.MultiServer;
 import top.xujiayao.mcdiscordchat.utils.ConfigManager;
-import top.xujiayao.mcdiscordchat.utils.Texts;
+import top.xujiayao.mcdiscordchat.utils.ConsoleLogListener;
+import top.xujiayao.mcdiscordchat.utils.Translations;
 import top.xujiayao.mcdiscordchat.utils.Utils;
 
 import java.io.File;
-import java.text.SimpleDateFormat;
 import java.time.Instant;
 import java.util.Timer;
 
@@ -43,13 +49,13 @@ public class Main implements DedicatedServerModInitializer {
 	//#endif
 	public static final File CONFIG_FILE = new File(FabricLoader.getInstance().getConfigDir().toFile(), "mcdiscordchat.json");
 	public static final File CONFIG_BACKUP_FILE = new File(FabricLoader.getInstance().getConfigDir().toFile(), "mcdiscordchat-backup.json");
-	public static final SimpleDateFormat SIMPLE_DATE_FORMAT = new SimpleDateFormat("HH:mm:ss");
-	public static final String VERSION = FabricLoader.getInstance().getModContainer("mcdiscordchat").orElseThrow(RuntimeException::new).getMetadata().getVersion().getFriendlyString();
+	public static final String VERSION = FabricLoader.getInstance().getModContainer("mcdiscordchat").orElseThrow().getMetadata().getVersion().getFriendlyString();
 	public static Config CONFIG;
 	public static JDA JDA;
 	public static TextChannel CHANNEL;
 	public static TextChannel CONSOLE_LOG_CHANNEL;
-	public static Texts TEXTS;
+	public static Thread CONSOLE_LOG_THREAD = new Thread(new ConsoleLogListener(true));
+	public static TextChannel UPDATE_NOTIFICATION_CHANNEL;
 	public static long MINECRAFT_LAST_RESET_TIME = System.currentTimeMillis();
 	public static int MINECRAFT_SEND_COUNT = 0;
 	public static MinecraftServer SERVER;
@@ -63,6 +69,7 @@ public class Main implements DedicatedServerModInitializer {
 	public void onInitializeServer() {
 		try {
 			ConfigManager.init(false);
+			Translations.init();
 
 			LOGGER.info("-----------------------------------------");
 			LOGGER.info("MCDiscordChat (MCDC) " + VERSION);
@@ -75,17 +82,22 @@ public class Main implements DedicatedServerModInitializer {
 			JDA = JDABuilder.createDefault(CONFIG.generic.botToken)
 					.setChunkingFilter(ChunkingFilter.ALL)
 					.setMemberCachePolicy(MemberCachePolicy.ALL)
-					.enableIntents(GatewayIntent.GUILD_MEMBERS)
+					.enableIntents(GatewayIntent.GUILD_MEMBERS, GatewayIntent.MESSAGE_CONTENT)
 					.addEventListeners(new DiscordEventListener())
 					.build();
 
 			JDA.awaitReady();
 
-			Utils.setBotActivity();
-
 			CHANNEL = JDA.getTextChannelById(CONFIG.generic.channelId);
 			if (!CONFIG.generic.consoleLogChannelId.isEmpty()) {
 				CONSOLE_LOG_CHANNEL = JDA.getTextChannelById(CONFIG.generic.consoleLogChannelId);
+				CONSOLE_LOG_THREAD.start();
+			}
+			if (!CONFIG.generic.updateNotificationChannelId.isEmpty()) {
+				UPDATE_NOTIFICATION_CHANNEL = JDA.getTextChannelById(CONFIG.generic.updateNotificationChannelId);
+			}
+			if (UPDATE_NOTIFICATION_CHANNEL == null || !UPDATE_NOTIFICATION_CHANNEL.canTalk()) {
+				UPDATE_NOTIFICATION_CHANNEL = CHANNEL;
 			}
 
 			Utils.updateBotCommands();
@@ -99,15 +111,25 @@ public class Main implements DedicatedServerModInitializer {
 			MULTI_SERVER.start();
 		}
 
+		//#if MC >= 11900
+		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> MinecraftCommands.register(dispatcher));
+		//#else
+		//$$ CommandRegistrationCallback.EVENT.register((dispatcher, dedicated) -> MinecraftCommands.register(dispatcher));
+		//#endif
+
 		ServerLifecycleEvents.SERVER_STARTED.register((server) -> {
 			SERVER_STARTED_TIME = Long.toString(Instant.now().getEpochSecond());
 
-			CHANNEL.sendMessage(TEXTS.serverStarted()).queue();
-			if (CONFIG.multiServer.enable) {
-				MULTI_SERVER.sendMessage(false, false, null, TEXTS.serverStarted());
+			if (CONFIG.generic.announceServerStartStop) {
+				CHANNEL.sendMessage(Translations.translateMessage("message.serverStarted")).queue();
+				if (CONFIG.multiServer.enable) {
+					MULTI_SERVER.sendMessage(false, false, false, null, Translations.translateMessage("message.serverStarted"));
+				}
 			}
 
 			SERVER = server;
+
+			Utils.setBotActivity();
 
 			Utils.initCheckUpdateTimer();
 
@@ -124,40 +146,70 @@ public class Main implements DedicatedServerModInitializer {
 			}
 		});
 
-		ServerLifecycleEvents.SERVER_STOPPING.register((server) -> {
+		ServerLifecycleEvents.SERVER_STOPPED.register((server) -> {
 			MSPT_MONITOR_TIMER.cancel();
 			CHANNEL_TOPIC_MONITOR_TIMER.cancel();
 			CHECK_UPDATE_TIMER.cancel();
 
+			CONSOLE_LOG_THREAD.interrupt();
+			try {
+				CONSOLE_LOG_THREAD.join(5000);
+			} catch (Exception e) {
+				LOGGER.error(ExceptionUtils.getStackTrace(e));
+			}
+
 			if (CONFIG.multiServer.enable) {
-				MULTI_SERVER.sendMessage(false, false, null, TEXTS.serverStopped());
+				if (CONFIG.generic.announceServerStartStop) {
+					MULTI_SERVER.sendMessage(false, false, false, null, Translations.translateMessage("message.serverStopped"));
+				}
 				MULTI_SERVER.bye();
 				MULTI_SERVER.stopMultiServer();
 			}
 
 			if (CONFIG.generic.updateChannelTopic) {
-				CHANNEL.sendMessage(TEXTS.serverStopped())
-						.submit()
-						.whenComplete((v, ex) -> {
-							String topic = TEXTS.offlineChannelTopic()
-									.replace("%lastUpdateTime%", Long.toString(Instant.now().getEpochSecond()));
+				if (CONFIG.generic.announceServerStartStop) {
+					CHANNEL.sendMessage(Translations.translateMessage("message.serverStopped"))
+							.submit()
+							.whenComplete((v, ex) -> {
+								String topic = Translations.translateMessage("message.offlineChannelTopic")
+										.replace("%lastUpdateTime%", Long.toString(Instant.now().getEpochSecond()));
 
-							CHANNEL.getManager().setTopic(topic)
-									.submit()
-									.whenComplete((v2, ex2) -> {
-										if (!CONFIG.generic.consoleLogChannelId.isEmpty()) {
-											CONSOLE_LOG_CHANNEL.getManager().setTopic(topic)
-													.submit()
-													.whenComplete((v3, ex3) -> JDA.shutdownNow());
-										} else {
-											JDA.shutdownNow();
-										}
-									});
-						});
+								CHANNEL.getManager().setTopic(topic)
+										.submit()
+										.whenComplete((v2, ex2) -> {
+											if (!CONFIG.generic.consoleLogChannelId.isEmpty()) {
+												CONSOLE_LOG_CHANNEL.getManager().setTopic(topic)
+														.submit()
+														.whenComplete((v3, ex3) -> JDA.shutdownNow());
+											} else {
+												JDA.shutdownNow();
+											}
+										});
+							});
+				} else {
+					String topic = Translations.translateMessage("message.offlineChannelTopic")
+							.replace("%lastUpdateTime%", Long.toString(Instant.now().getEpochSecond()));
+
+					CHANNEL.getManager().setTopic(topic)
+							.submit()
+							.whenComplete((v2, ex2) -> {
+								if (!CONFIG.generic.consoleLogChannelId.isEmpty()) {
+									CONSOLE_LOG_CHANNEL.getManager().setTopic(topic)
+											.submit()
+											.whenComplete((v3, ex3) -> JDA.shutdownNow());
+								} else {
+									JDA.shutdownNow();
+								}
+							});
+				}
 			} else {
-				CHANNEL.sendMessage(TEXTS.serverStopped())
-						.submit()
-						.whenComplete((v, ex) -> JDA.shutdownNow());
+				if (CONFIG.generic.announceServerStartStop) {
+					CHANNEL.sendMessage(Translations.translateMessage("message.serverStopped"))
+							.submit()
+							.whenComplete((v, ex) -> JDA.shutdownNow());
+				} else {
+					JDA.shutdownNow();
+				}
 			}
 		});
 	}

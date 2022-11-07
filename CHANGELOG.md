@@ -1,19 +1,22 @@
 # Changelog 更新日志
 
-## MCDiscordChat 2.0.0-alpha.5 for Minecraft 1.14+ - 2022/7/1
+## MCDiscordChat 2.1.0 for Minecraft 1.14+ - 2022/11/7
 
 ## New Features 新特性
 
-- All parsing can be disabled (#51)
-  可以禁用所有解析
+- Russian translation (#94)
+  俄语翻译
+
+- Bot activity status supports displaying server player count (#90)
+  机器人活动状态支持显示服务器玩家数
+
+- Minecraft command auto-completion for Discord /console command (#25)
+  Discord /console 命令实现 Minecraft 命令自动补全
 
 ## Changes 更改
 
-- Fix Okio compatibility issue (#55)
-  修复 Okio 兼容性问题
-
-- Change the logic of check for updates function (#52)
-  更改检查更新功能的逻辑
+- Fix GSON Invalid escape sequence exception when escaping Markdown (#92)
+  修复转义 Markdown 时 GSON 解析报错
 
 ## Removed 移除
 
@@ -22,7 +25,8 @@ N/A
 ## Contributors 贡献者
 
 - @Xujiayao
+- @ZetThunder
 
 ## Detailed Information 详细信息
 
-https://github.com/Xujiayao/MCDiscordChat/compare/2.0.0-alpha.4...2.0.0-alpha.5
+https://github.com/Xujiayao/MCDiscordChat/compare/2.0.0...2.1.0

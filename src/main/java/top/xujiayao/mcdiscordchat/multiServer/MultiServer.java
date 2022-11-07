@@ -6,6 +6,7 @@ import org.apache.commons.lang3.exception.ExceptionUtils;
 import top.xujiayao.mcdiscordchat.multiServer.client.Client;
 import top.xujiayao.mcdiscordchat.multiServer.server.Server;
 import top.xujiayao.mcdiscordchat.multiServer.server.UserThread;
+import top.xujiayao.mcdiscordchat.utils.Translations;
 
 import java.time.Instant;
 import java.util.Collections;
@@ -19,7 +20,6 @@ import static top.xujiayao.mcdiscordchat.Main.CHANNEL_TOPIC_MONITOR_TIMER;
 import static top.xujiayao.mcdiscordchat.Main.CONFIG;
 import static top.xujiayao.mcdiscordchat.Main.CONSOLE_LOG_CHANNEL;
 import static top.xujiayao.mcdiscordchat.Main.LOGGER;
-import static top.xujiayao.mcdiscordchat.Main.TEXTS;
 
 /**
  * @author Xujiayao
@@ -50,11 +50,12 @@ public class MultiServer extends Thread {
 		}
 	}
 
-	public void sendMessage(boolean special, boolean isChat, String playerName, String message) {
+	public void sendMessage(boolean special, boolean isChat, boolean isText, String playerName, String message) {
 		JsonObject json = new JsonObject();
 		json.addProperty("serverName", CONFIG.multiServer.name);
 		json.addProperty("special", special);
 		json.addProperty("isChat", isChat);
+		json.addProperty("isText", isText);
 		json.addProperty("playerName", playerName);
 		json.addProperty("message", message);
 
@@ -103,7 +104,7 @@ public class MultiServer extends Thread {
 					serverStartedTime.add(Long.parseLong(infoJson.get("serverStartedTime").getAsString()));
 				}
 
-				String topic = TEXTS.onlineChannelTopicForMultiServer()
+				String topic = Translations.translateMessage("message.onlineChannelTopicForMultiServer")
 						.replace("%onlinePlayerCount%", Integer.toString(onlinePlayerCount))
 						.replace("%maxPlayerCount%", Integer.toString(maxPlayerCount))
 						.replace("%uniquePlayerCount%", Integer.toString(uniquePlayers.size()))

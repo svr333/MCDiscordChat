@@ -1,6 +1,8 @@
 package top.xujiayao.mcdiscordchat.utils;
 
+import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonSyntaxException;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
@@ -27,14 +29,21 @@ public class ConfigManager {
 				load();
 
 				try {
-					Utils.testJsonValid();
-				} catch (Exception e) {
+					if (!CONFIG.customMessage.formattedResponseMessage.isBlank()) {
+						new Gson().fromJson(CONFIG.customMessage.formattedResponseMessage, Object.class);
+					}
+					if (!CONFIG.customMessage.formattedChatMessage.isBlank()) {
+						new Gson().fromJson(CONFIG.customMessage.formattedChatMessage, Object.class);
+					}
+					if (!CONFIG.customMessage.formattedOtherMessage.isBlank()) {
+						new Gson().fromJson(CONFIG.customMessage.formattedOtherMessage, Object.class);
+					}
+				} catch (JsonSyntaxException e) {
 					LOGGER.error(ExceptionUtils.getStackTrace(e));
 					LOGGER.error("Invalid JSON!");
 				}
 
 				update();
-				Utils.reloadTexts();
 			} catch (Exception e) {
 				if (throwException) {
 					throw e;
@@ -47,16 +56,11 @@ public class ConfigManager {
 
 			LOGGER.error("-----------------------------------------");
 			LOGGER.error("Error: The config file cannot be found or is empty!");
-			LOGGER.error("错误：找不到配置文件或配置文件为空！");
 			LOGGER.error("");
 			LOGGER.error("Please follow the documentation to configure MCDiscordChat before restarting the server!");
 			LOGGER.error("More information + Docs: https://blog.xujiayao.top/posts/4ba0a17a/");
 			LOGGER.error("");
-			LOGGER.error("请在重新启动服务器之前按照文档配置 MCDiscordChat！");
-			LOGGER.error("更多信息 + 文档：https://blog.xujiayao.top/posts/4ba0a17a/");
-			LOGGER.error("");
 			LOGGER.error("Stopping the server...");
-			LOGGER.error("正在停止服务器...");
 			LOGGER.error("-----------------------------------------");
 
 			System.exit(0);

@@ -1,0 +1,82 @@
+apply plugin: "fabric-loom"
+
+sourceCompatibility = JavaVersion.VERSION_17
+targetCompatibility = JavaVersion.VERSION_17
+
+archivesBaseName = project.archives_base_name
+version = project.mod_version
+group = project.maven_group
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.parent.minecraft_version}"
+    mappings "net.fabricmc:yarn:${project.parent.yarn_mappings}:v2"
+
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+
+    include("net.dv8tion:JDA:5.0.0-alpha.22") {
+        exclude module: "opus-java"
+    }
+    include("net.sf.trove4j:trove4j:3.0.3")
+    include("org.apache.commons:commons-collections4:4.4")
+    include("org.slf4j:slf4j-api:2.0.3")
+    include("com.neovisionaries:nv-websocket-client:2.14")
+    include("com.fasterxml.jackson.core:jackson-core:2.13.4")
+    include("com.fasterxml.jackson.core:jackson-databind:2.13.4.2")
+    include("com.fasterxml.jackson.core:jackson-annotations:2.13.4")
+
+    include("com.squareup.okhttp3:okhttp:4.10.0")
+    include("com.squareup.okio:okio:2.10.0")
+    include("org.jetbrains.kotlin:kotlin-stdlib:1.7.20")
+
+    include("com.vdurmont:emoji-java:5.1.1")
+    include("org.json:json:20220924")
+
+    include("com.google.code.gson:gson:2.10")
+}
+
+def fabric_subprojects = project.parent.subprojects.findAll({
+    it.name != "wrapper"
+})
+
+remapJar {
+    outputs.upToDateWhen { false }
+
+    dependsOn(fabric_subprojects.collect {
+        it.tasks.remapJar
+    })
+
+    doFirst {
+        delete fileTree("build/tmp/versions/META-INF/jars")
+        copy {
+            from {
+                fabric_subprojects.collect {
+                    it.remapJar.outputs.files
+                }
+            }
+            into("build/tmp/versions/META-INF/jars")
+        }
+    }
+
+    from("../LICENSE")
+    from("build/tmp/versions")
+}
+
+processResources {
+    filesMatching("fabric.mod.json") {
+        def valueMap = [
+                "version": project.mod_version
+        ]
+        expand valueMap
+    }
+}
+
+loom {
+    runConfigs.all {
+        runDir "../run"
+    }
+}

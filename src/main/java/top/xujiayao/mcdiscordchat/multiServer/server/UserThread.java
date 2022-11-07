@@ -5,10 +5,12 @@ import com.google.gson.JsonObject;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.net.Socket;
+import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 
 import static top.xujiayao.mcdiscordchat.Main.LOGGER;
@@ -31,6 +33,8 @@ public class UserThread extends Thread {
 
 	@Override
 	public void run() {
+		LOGGER.info("[MultiServer] A client is connected to the server");
+
 		try {
 			reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
 
@@ -52,8 +56,12 @@ public class UserThread extends Thread {
 
 				server.broadcast(message, this);
 			}
-		} catch (Exception ignored) {
+		} catch (SocketException ignored) {
+		} catch (IOException e) {
+			LOGGER.error(ExceptionUtils.getStackTrace(e));
 		}
+
+		LOGGER.info("[MultiServer] A client has disconnected from the server");
 
 		stopUserThread();
 	}

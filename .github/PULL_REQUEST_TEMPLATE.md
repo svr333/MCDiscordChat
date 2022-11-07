@@ -10,15 +10,12 @@
 <!-- Set [ ] to [X] -->
 
 - [ ] I confirm that I have [searched for existing issues / pull requests](https://github.com/Xujiayao/MCDiscordChat/issues?q=) before requesting to avoid duplicate requesting.
+- [ ] I confirm that I noted that if I don't follow the instructions, the issue may be closed directly.
 
 ### Related Issues
 
 <!-- Any GitHub issues related to this PR? If not, please fill in N/A. -->
 <!-- Example: Fix #ISSUE-NUMBER -->
-<!---->
-<!-- Start -->
-
-<!-- End -->
 
 ### Description
 
@@ -27,7 +24,3 @@
 <!---->
 <!-- For New Feature Pull Request: -->
 <!-- What new feature or change have you added? What does it improve? Please tell us what the new feature or change is with a clear and detailed description, add screenshots to help explain if possible. -->
-<!---->
-<!-- Start -->
-
-<!-- End -->
